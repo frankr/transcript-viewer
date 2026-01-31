@@ -39,19 +39,66 @@ interface PayloadEntry {
 
 const PAYLOAD_LOG_PATH = path.join(os.homedir(), '.clawdbot', 'logs', 'anthropic-payload.jsonl');
 
+function readLastNLines(filePath: string, n: number): string[] {
+  // Efficiently read the last N lines from a file without loading the whole thing
+  const CHUNK_SIZE = 64 * 1024; // 64KB chunks
+  const fd = fs.openSync(filePath, 'r');
+  const stats = fs.fstatSync(fd);
+  const fileSize = stats.size;
+  
+  if (fileSize === 0) {
+    fs.closeSync(fd);
+    return [];
+  }
+
+  const lines: string[] = [];
+  let buffer = '';
+  let position = fileSize;
+  
+  while (position > 0 && lines.length < n) {
+    const readSize = Math.min(CHUNK_SIZE, position);
+    position -= readSize;
+    
+    const chunk = Buffer.alloc(readSize);
+    fs.readSync(fd, chunk, 0, readSize, position);
+    buffer = chunk.toString('utf-8') + buffer;
+    
+    // Extract complete lines from buffer
+    const parts = buffer.split('\n');
+    
+    // Keep the first part (might be incomplete) in buffer
+    buffer = parts[0];
+    
+    // Add complete lines (in reverse order since we're reading backwards)
+    for (let i = parts.length - 1; i > 0; i--) {
+      if (parts[i].trim()) {
+        lines.unshift(parts[i]);
+        if (lines.length >= n) break;
+      }
+    }
+  }
+  
+  // Don't forget remaining buffer if we've reached the start
+  if (position === 0 && buffer.trim() && lines.length < n) {
+    lines.unshift(buffer);
+  }
+  
+  fs.closeSync(fd);
+  return lines.slice(-n); // Ensure we return exactly n lines max
+}
+
 function readPayloadLog(limit: number = 100): PayloadEntry[] {
   if (!fs.existsSync(PAYLOAD_LOG_PATH)) {
     return [];
   }
 
   try {
-    const content = fs.readFileSync(PAYLOAD_LOG_PATH, 'utf-8');
-    const lines = content.trim().split('\n').filter(line => line.trim());
+    // Read only the last N lines efficiently
+    const lines = readLastNLines(PAYLOAD_LOG_PATH, limit);
     
     const entries: PayloadEntry[] = [];
     for (const line of lines) {
       try {
-        // Parse but DON'T include the full payload in the list response
         const entry = JSON.parse(line) as PayloadEntry;
         entries.push(entry);
       } catch {
@@ -60,7 +107,7 @@ function readPayloadLog(limit: number = 100): PayloadEntry[] {
     }
 
     // Return most recent entries first
-    return entries.reverse().slice(0, limit);
+    return entries.reverse();
   } catch (error) {
     console.error('Error reading payload log:', error);
     return [];
