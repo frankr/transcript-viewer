@@ -7,10 +7,12 @@ import { MessageDisplay } from '@/components/message-display';
 import { StatsPanel } from '@/components/stats-panel';
 import { FilterControls, RoleFilter } from '@/components/filter-controls';
 import { SystemContext } from '@/components/system-context';
+import { PayloadViewer } from '@/components/payload-viewer';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
-import { Menu, X, Download } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Menu, X, Download, MessageSquare, Send } from 'lucide-react';
 
 export default function Home() {
   const [sessions, setSessions] = useState<SessionFile[]>([]);
@@ -19,6 +21,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [loadingSession, setLoadingSession] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeTab, setActiveTab] = useState<'transcripts' | 'payloads'>('transcripts');
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -191,26 +194,51 @@ export default function Home() {
       `}>
         <div className="p-4 border-b border-zinc-800">
           <h1 className="text-lg font-semibold text-zinc-100">
-            📜 Transcript Viewer
+            🔍 Context Inspector
           </h1>
           <p className="text-xs text-zinc-500 mt-1">
-            Clawdbot Session Browser
+            Clawdbot Session & Payload Browser
           </p>
+          
+          {/* Tab Switcher */}
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'transcripts' | 'payloads')} className="mt-3">
+            <TabsList className="grid w-full grid-cols-2 bg-zinc-800">
+              <TabsTrigger value="transcripts" className="gap-1 text-xs data-[state=active]:bg-zinc-700">
+                <MessageSquare className="h-3 w-3" />
+                Transcripts
+              </TabsTrigger>
+              <TabsTrigger value="payloads" className="gap-1 text-xs data-[state=active]:bg-zinc-700">
+                <Send className="h-3 w-3" />
+                Payloads
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
-        <SessionList
-          sessions={sessions}
-          selectedId={selectedSession}
-          onSelect={(id) => {
-            setSelectedSession(id);
-            setSidebarOpen(false);
-          }}
-          loading={loading}
-        />
+        
+        {activeTab === 'transcripts' && (
+          <SessionList
+            sessions={sessions}
+            selectedId={selectedSession}
+            onSelect={(id) => {
+              setSelectedSession(id);
+              setSidebarOpen(false);
+            }}
+            loading={loading}
+          />
+        )}
+        
+        {activeTab === 'payloads' && (
+          <div className="flex-1 flex items-center justify-center p-4 text-zinc-500 text-sm text-center">
+            <p>Payloads show the full API requests sent to the LLM provider</p>
+          </div>
+        )}
       </div>
 
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {selectedSession && sessionData ? (
+        {activeTab === 'payloads' ? (
+          <PayloadViewer />
+        ) : selectedSession && sessionData ? (
           <>
             {/* System Context */}
             <SystemContext />
