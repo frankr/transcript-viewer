@@ -6,6 +6,7 @@ import { SessionList } from '@/components/session-list';
 import { MessageDisplay } from '@/components/message-display';
 import { StatsPanel } from '@/components/stats-panel';
 import { FilterControls, RoleFilter } from '@/components/filter-controls';
+import { SystemContext } from '@/components/system-context';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
@@ -211,6 +212,9 @@ export default function Home() {
       <div className="flex-1 flex flex-col overflow-hidden">
         {selectedSession && sessionData ? (
           <>
+            {/* System Context */}
+            <SystemContext />
+
             {/* Stats bar */}
             <div className="flex items-center justify-between border-b border-zinc-800">
               <StatsPanel stats={sessionData.stats} />
