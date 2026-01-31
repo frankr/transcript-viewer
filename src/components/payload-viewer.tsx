@@ -1,16 +1,19 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { ChevronRight, ChevronDown, AlertCircle, Send, Cpu, Wrench, MessageSquare, FileText, RefreshCw, Copy, Check } from 'lucide-react';
+import { ChevronRight, ChevronDown, AlertCircle, Send, Cpu, Wrench, MessageSquare, FileText, RefreshCw, Copy, Check, User, Bot, Zap, Filter } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface PayloadSummary {
   model?: string;
   maxTokens?: number;
+  turnType?: 'new_turn' | 'continuation';
+  triggeringMessage?: string | null;
+  userPreview?: string | null;
   systemPrompt: {
     chars: number;
     estimatedTokens: number;
@@ -147,7 +150,6 @@ function PayloadDetailView({ digest }: { digest: string }) {
 
   const { payload } = data;
 
-  // Extract system prompt text
   let systemText = '';
   if (typeof payload.system === 'string') {
     systemText = payload.system;
@@ -160,8 +162,7 @@ function PayloadDetailView({ digest }: { digest: string }) {
   };
 
   return (
-    <div className="divide-y divide-zinc-800">
-      {/* System Prompt */}
+    <div className="divide-y divide-zinc-800 ml-6 border-l-2 border-zinc-700">
       <Collapsible open={expandedSections.system} onOpenChange={() => toggleSection('system')}>
         <CollapsibleTrigger asChild>
           <Button variant="ghost" className="w-full justify-start px-3 py-2 h-auto rounded-none hover:bg-zinc-800">
@@ -185,7 +186,6 @@ function PayloadDetailView({ digest }: { digest: string }) {
         </CollapsibleContent>
       </Collapsible>
 
-      {/* Messages */}
       <Collapsible open={expandedSections.messages} onOpenChange={() => toggleSection('messages')}>
         <CollapsibleTrigger asChild>
           <Button variant="ghost" className="w-full justify-start px-3 py-2 h-auto rounded-none hover:bg-zinc-800">
@@ -217,7 +217,6 @@ function PayloadDetailView({ digest }: { digest: string }) {
         </CollapsibleContent>
       </Collapsible>
 
-      {/* Tools */}
       <Collapsible open={expandedSections.tools} onOpenChange={() => toggleSection('tools')}>
         <CollapsibleTrigger asChild>
           <Button variant="ghost" className="w-full justify-start px-3 py-2 h-auto rounded-none hover:bg-zinc-800">
@@ -251,83 +250,115 @@ function PayloadDetailView({ digest }: { digest: string }) {
   );
 }
 
-function PayloadEntryRow({ entry, isExpanded, onToggle }: { 
+function PayloadEntryRow({ 
+  entry, 
+  isExpanded, 
+  onToggle,
+  isFirstInTurn,
+  isLastInTurn,
+}: { 
   entry: PayloadEntry; 
   isExpanded: boolean;
   onToggle: () => void;
+  isFirstInTurn: boolean;
+  isLastInTurn: boolean;
 }) {
   const isRequest = entry.stage === 'request';
   
   return (
-    <div className="border-b border-zinc-800 last:border-b-0">
-      <Button
-        variant="ghost"
-        className="w-full justify-start px-3 py-2 h-auto rounded-none hover:bg-zinc-800/50"
+    <div className={cn(
+      "border-b border-zinc-800/50",
+      isFirstInTurn && "border-t-2 border-t-blue-500 mt-4 pt-1 bg-gradient-to-b from-blue-950/20 to-transparent",
+    )}>
+      {/* User message banner for new turns */}
+      {isFirstInTurn && entry.summary?.triggeringMessage && (
+        <div className="px-4 py-3 bg-blue-950/30 border-b border-blue-900/50">
+          <div className="flex items-start gap-3">
+            <User className="h-5 w-5 text-blue-400 mt-0.5 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs font-medium text-blue-300">USER REQUEST</span>
+                <span className="text-xs text-zinc-500 font-mono">{formatTime(entry.ts)}</span>
+              </div>
+              <p className="text-sm text-zinc-200 whitespace-pre-wrap break-words">
+                {entry.summary.triggeringMessage}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Compact row for API call details */}
+      <button
+        className={cn(
+          "w-full text-left px-4 py-2 hover:bg-zinc-800/30 flex items-center gap-3 transition-colors",
+          isLastInTurn && !isFirstInTurn && "bg-green-950/10"
+        )}
         onClick={onToggle}
       >
-        <ChevronRight className={cn("h-4 w-4 mr-2 transition-transform", isExpanded && "rotate-90")} />
+        <ChevronRight className={cn(
+          "h-4 w-4 text-zinc-500 transition-transform flex-shrink-0",
+          isExpanded && "rotate-90"
+        )} />
         
-        {isRequest ? (
-          <Send className="h-4 w-4 mr-2 text-blue-400" />
+        {isFirstInTurn ? (
+          <Send className="h-4 w-4 text-blue-400 flex-shrink-0" />
+        ) : isLastInTurn ? (
+          <Bot className="h-4 w-4 text-green-400 flex-shrink-0" />
+        ) : isRequest ? (
+          <Zap className="h-4 w-4 text-yellow-500/60 flex-shrink-0" />
         ) : (
-          <Cpu className="h-4 w-4 mr-2 text-purple-400" />
+          <Cpu className="h-4 w-4 text-purple-400/60 flex-shrink-0" />
         )}
         
-        <span className="text-xs text-zinc-500 font-mono mr-3">
+        <span className="text-xs text-zinc-500 font-mono flex-shrink-0">
           {formatTime(entry.ts)}
         </span>
         
-        <Badge 
-          variant="outline" 
-          className={cn(
-            "text-xs mr-2",
-            isRequest 
-              ? "bg-blue-900/30 text-blue-400 border-blue-700" 
-              : "bg-purple-900/30 text-purple-400 border-purple-700"
-          )}
-        >
-          {entry.stage}
-        </Badge>
+        {isLastInTurn && !isFirstInTurn && (
+          <Badge variant="outline" className="text-xs bg-green-900/40 text-green-300 border-green-600 flex-shrink-0">
+            RESPONSE
+          </Badge>
+        )}
         
-        {entry.modelId && (
-          <Badge variant="outline" className="text-xs bg-zinc-800 text-zinc-300 border-zinc-700 mr-2">
-            {entry.modelId}
+        {!isFirstInTurn && !isLastInTurn && isRequest && (
+          <Badge variant="outline" className="text-xs bg-yellow-900/20 text-yellow-400/60 border-yellow-700/40 flex-shrink-0">
+            tool loop
           </Badge>
         )}
 
+        {entry.modelId && (
+          <span className="text-xs text-zinc-600 flex-shrink-0">
+            {entry.modelId}
+          </span>
+        )}
+
+        <div className="flex-1" />
+
         {isRequest && entry.summary && (
-          <div className="ml-auto flex items-center gap-2 text-xs text-zinc-500">
-            <span>{entry.summary.messages.total} msgs</span>
-            <span>•</span>
-            <span>{entry.summary.tools.count} tools</span>
-            <span>•</span>
-            <span>~{(entry.summary.totalChars / 1024).toFixed(0)}KB</span>
-          </div>
+          <span className="text-xs text-zinc-600 flex-shrink-0">
+            {entry.summary.messages.total} msgs · ~{(entry.summary.totalChars / 1024).toFixed(0)}KB
+          </span>
         )}
 
         {!isRequest && entry.usage && (
-          <div className="ml-auto flex items-center gap-2 text-xs text-zinc-500">
-            <span>in: {entry.usage.input_tokens?.toLocaleString()}</span>
-            <span>out: {entry.usage.output_tokens?.toLocaleString()}</span>
+          <span className="text-xs text-zinc-600 flex-shrink-0">
+            {entry.usage.input_tokens?.toLocaleString()} in · {entry.usage.output_tokens?.toLocaleString()} out
             {entry.usage.cache_read_input_tokens && (
-              <span className="text-green-500">cached: {entry.usage.cache_read_input_tokens.toLocaleString()}</span>
+              <span className="text-green-500/70 ml-1">
+                ({((entry.usage.cache_read_input_tokens / (entry.usage.input_tokens || 1)) * 100).toFixed(0)}% cached)
+              </span>
             )}
-          </div>
+          </span>
         )}
-
-        {entry.error && (
-          <Badge variant="outline" className="ml-auto text-xs bg-red-900/30 text-red-400 border-red-700">
-            error
-          </Badge>
-        )}
-      </Button>
+      </button>
 
       {isExpanded && entry.payloadDigest && (
         <PayloadDetailView digest={entry.payloadDigest} />
       )}
 
-      {isExpanded && entry.usage && (
-        <div className="p-3 bg-zinc-950/50 text-xs font-mono text-zinc-400">
+      {isExpanded && entry.usage && !entry.payloadDigest && (
+        <div className="p-3 bg-zinc-950/50 text-xs font-mono text-zinc-400 ml-6 border-l-2 border-zinc-700">
           <div className="grid grid-cols-2 gap-2 max-w-md">
             <div>Input tokens:</div>
             <div>{entry.usage.input_tokens?.toLocaleString()}</div>
@@ -346,9 +377,6 @@ function PayloadEntryRow({ entry, isExpanded, onToggle }: {
               </>
             )}
           </div>
-          {entry.error && (
-            <div className="mt-2 text-red-400">Error: {entry.error}</div>
-          )}
         </div>
       )}
     </div>
@@ -359,10 +387,11 @@ export function PayloadViewer() {
   const [data, setData] = useState<PayloadData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedEntry, setExpandedEntry] = useState<string | null>(null);
+  const [showOnlyUserTurns, setShowOnlyUserTurns] = useState(false);
 
   const loadPayloads = () => {
     setLoading(true);
-    fetch('/api/payloads?limit=50')
+    fetch('/api/payloads?limit=200')
       .then(res => res.json())
       .then(data => {
         setData(data);
@@ -377,6 +406,77 @@ export function PayloadViewer() {
   useEffect(() => {
     loadPayloads();
   }, []);
+
+  // Process entries to identify turns
+  const { processedEntries, turnCount } = useMemo(() => {
+    if (!data?.entries) return { processedEntries: [], turnCount: 0 };
+    
+    const entryMeta = new Map<number, { isFirst: boolean; isLast: boolean }>();
+    let turnCount = 0;
+    
+    // Entries are newest first, process to find turn boundaries
+    // A new turn starts with turnType === 'new_turn'
+    let currentTurnIndices: number[] = [];
+    
+    // Process in reverse (oldest first) to build turns correctly
+    const entriesReversed = [...data.entries].reverse();
+    
+    entriesReversed.forEach((entry, i) => {
+      const originalIndex = data.entries.length - 1 - i;
+      
+      if (entry.stage === 'request' && entry.summary?.turnType === 'new_turn') {
+        // Finalize previous turn
+        if (currentTurnIndices.length > 0) {
+          currentTurnIndices.forEach((idx, j) => {
+            entryMeta.set(idx, {
+              isFirst: j === 0,
+              isLast: j === currentTurnIndices.length - 1
+            });
+          });
+          turnCount++;
+        }
+        // Start new turn
+        currentTurnIndices = [originalIndex];
+      } else {
+        currentTurnIndices.push(originalIndex);
+      }
+    });
+    
+    // Finalize last turn
+    if (currentTurnIndices.length > 0) {
+      currentTurnIndices.forEach((idx, j) => {
+        entryMeta.set(idx, {
+          isFirst: j === 0,
+          isLast: j === currentTurnIndices.length - 1
+        });
+      });
+      turnCount++;
+    }
+    
+    const processedEntries = data.entries.map((entry, i) => ({
+      entry,
+      index: i,
+      meta: entryMeta.get(i) || { isFirst: false, isLast: false }
+    }));
+    
+    return { processedEntries, turnCount };
+  }, [data?.entries]);
+
+  // Filter entries if showing only user turns
+  const displayEntries = useMemo(() => {
+    if (!showOnlyUserTurns) return processedEntries;
+    return processedEntries.filter(e => e.meta.isFirst);
+  }, [processedEntries, showOnlyUserTurns]);
+
+  // Group by date for display
+  const entriesByDate = useMemo(() => {
+    return displayEntries.reduce((acc, item) => {
+      const date = formatDate(item.entry.ts);
+      if (!acc[date]) acc[date] = [];
+      acc[date].push(item);
+      return acc;
+    }, {} as Record<string, typeof displayEntries>);
+  }, [displayEntries]);
 
   if (loading) {
     return (
@@ -404,14 +504,6 @@ export function PayloadViewer() {
     );
   }
 
-  // Group entries by date
-  const entriesByDate = data.entries.reduce((acc, entry) => {
-    const date = formatDate(entry.ts);
-    if (!acc[date]) acc[date] = [];
-    acc[date].push(entry);
-    return acc;
-  }, {} as Record<string, PayloadEntry[]>);
-
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
@@ -420,45 +512,76 @@ export function PayloadViewer() {
           <Send className="h-5 w-5 text-blue-400" />
           <div>
             <h2 className="text-sm font-medium text-zinc-200">API Payloads</h2>
-            <p className="text-xs text-zinc-500">{data.fileSize} • {data.totalEntries} entries</p>
+            <p className="text-xs text-zinc-500">{data.fileSize} · {data.totalEntries} entries · {turnCount} user turns</p>
           </div>
         </div>
-        <Button variant="ghost" size="sm" onClick={loadPayloads} className="gap-1">
-          <RefreshCw className="h-4 w-4" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant={showOnlyUserTurns ? "default" : "ghost"} 
+            size="sm" 
+            onClick={() => setShowOnlyUserTurns(!showOnlyUserTurns)}
+            className={cn("gap-1.5", showOnlyUserTurns && "bg-blue-600 hover:bg-blue-700")}
+          >
+            <Filter className="h-4 w-4" />
+            User turns only
+          </Button>
+          <Button variant="ghost" size="sm" onClick={loadPayloads} className="gap-1">
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </Button>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center gap-6 px-4 py-2 border-b border-zinc-800 bg-zinc-900/30 text-xs">
+        <div className="flex items-center gap-1.5">
+          <User className="h-3.5 w-3.5 text-blue-400" />
+          <span className="text-zinc-400">User request</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Zap className="h-3.5 w-3.5 text-yellow-500/60" />
+          <span className="text-zinc-400">Tool loop</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Bot className="h-3.5 w-3.5 text-green-400" />
+          <span className="text-zinc-400">Final response</span>
+        </div>
       </div>
 
       {/* Entries */}
-      <ScrollArea className="flex-1">
-        {Object.entries(entriesByDate).map(([date, entries]) => (
-          <div key={date}>
-            <div className="px-4 py-2 bg-zinc-900/30 text-xs font-medium text-zinc-500 sticky top-0">
-              {date}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-5xl mx-auto">
+          {Object.entries(entriesByDate).map(([date, items]) => (
+            <div key={date}>
+              <div className="px-4 py-2 bg-zinc-900/50 text-xs font-medium text-zinc-500 sticky top-0 z-10 border-b border-zinc-800">
+                {date}
+              </div>
+              {items.map(({ entry, index, meta }) => {
+                const key = entry.payloadDigest || `${entry.ts}-${index}`;
+                return (
+                  <PayloadEntryRow
+                    key={key}
+                    entry={entry}
+                    isExpanded={expandedEntry === key}
+                    onToggle={() => setExpandedEntry(expandedEntry === key ? null : key)}
+                    isFirstInTurn={meta.isFirst}
+                    isLastInTurn={meta.isLast}
+                  />
+                );
+              })}
             </div>
-            {entries.map((entry, i) => {
-              const key = entry.payloadDigest || `${entry.ts}-${i}`;
-              return (
-                <PayloadEntryRow
-                  key={key}
-                  entry={entry}
-                  isExpanded={expandedEntry === key}
-                  onToggle={() => setExpandedEntry(expandedEntry === key ? null : key)}
-                />
-              );
-            })}
-          </div>
-        ))}
+          ))}
 
-        {data.entries.length === 0 && (
-          <div className="flex items-center justify-center h-64 text-zinc-500">
-            <div className="text-center">
-              <p>No payload entries yet</p>
-              <p className="text-sm mt-1">Send a message to see API payloads logged here</p>
+          {data.entries.length === 0 && (
+            <div className="flex items-center justify-center h-64 text-zinc-500">
+              <div className="text-center">
+                <p>No payload entries yet</p>
+                <p className="text-sm mt-1">Send a message to see API payloads logged here</p>
+              </div>
             </div>
-          </div>
-        )}
-      </ScrollArea>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

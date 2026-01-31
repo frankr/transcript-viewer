@@ -8,6 +8,8 @@ import { StatsPanel } from '@/components/stats-panel';
 import { FilterControls, RoleFilter } from '@/components/filter-controls';
 import { SystemContext } from '@/components/system-context';
 import { PayloadViewer } from '@/components/payload-viewer';
+import { PayloadTurnList, UserTurn } from '@/components/payload-turn-list';
+import { PayloadDetailView } from '@/components/payload-detail-view';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
@@ -22,6 +24,7 @@ export default function Home() {
   const [loadingSession, setLoadingSession] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<'transcripts' | 'payloads'>('transcripts');
+  const [selectedPayloadTurn, setSelectedPayloadTurn] = useState<UserTurn | null>(null);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -201,7 +204,13 @@ export default function Home() {
           </p>
           
           {/* Tab Switcher */}
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'transcripts' | 'payloads')} className="mt-3">
+          <Tabs value={activeTab} onValueChange={(v) => {
+            setActiveTab(v as 'transcripts' | 'payloads');
+            // Clear selections when switching tabs
+            if (v === 'transcripts') {
+              setSelectedPayloadTurn(null);
+            }
+          }} className="mt-3">
             <TabsList className="grid w-full grid-cols-2 bg-zinc-800">
               <TabsTrigger value="transcripts" className="gap-1 text-xs data-[state=active]:bg-zinc-700">
                 <MessageSquare className="h-3 w-3" />
@@ -228,16 +237,31 @@ export default function Home() {
         )}
         
         {activeTab === 'payloads' && (
-          <div className="flex-1 flex items-center justify-center p-4 text-zinc-500 text-sm text-center">
-            <p>Payloads show the full API requests sent to the LLM provider</p>
-          </div>
+          <PayloadTurnList
+            selectedTurnId={selectedPayloadTurn?.id || null}
+            onSelectTurn={(turn) => {
+              setSelectedPayloadTurn(turn);
+              setSidebarOpen(false); // Close sidebar on mobile when selecting
+            }}
+          />
         )}
       </div>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
         {activeTab === 'payloads' ? (
-          <PayloadViewer />
+          <div className="h-full overflow-hidden">
+            {selectedPayloadTurn ? (
+              <PayloadDetailView turn={selectedPayloadTurn} />
+            ) : (
+              <div className="flex-1 flex items-center justify-center h-full text-zinc-500">
+                <div className="text-center">
+                  <p className="text-xl mb-2">👈 Select a turn</p>
+                  <p className="text-sm">Browse user requests from the sidebar</p>
+                </div>
+              </div>
+            )}
+          </div>
         ) : selectedSession && sessionData ? (
           <>
             {/* System Context */}

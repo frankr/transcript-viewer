@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import readline from 'readline';
 
 interface PayloadEntry {
   ts: string;
@@ -40,31 +39,32 @@ interface PayloadEntry {
 
 const PAYLOAD_LOG_PATH = path.join(os.homedir(), '.clawdbot', 'logs', 'anthropic-payload.jsonl');
 
-async function readPayloadLog(limit: number = 100): Promise<PayloadEntry[]> {
+function readPayloadLog(limit: number = 100): PayloadEntry[] {
   if (!fs.existsSync(PAYLOAD_LOG_PATH)) {
     return [];
   }
 
-  const entries: PayloadEntry[] = [];
-  const fileStream = fs.createReadStream(PAYLOAD_LOG_PATH);
-  const rl = readline.createInterface({
-    input: fileStream,
-    crlfDelay: Infinity,
-  });
-
-  for await (const line of rl) {
-    if (line.trim()) {
+  try {
+    const content = fs.readFileSync(PAYLOAD_LOG_PATH, 'utf-8');
+    const lines = content.trim().split('\n').filter(line => line.trim());
+    
+    const entries: PayloadEntry[] = [];
+    for (const line of lines) {
       try {
+        // Parse but DON'T include the full payload in the list response
         const entry = JSON.parse(line) as PayloadEntry;
         entries.push(entry);
       } catch {
         // Skip malformed lines
       }
     }
-  }
 
-  // Return most recent entries first
-  return entries.reverse().slice(0, limit);
+    // Return most recent entries first
+    return entries.reverse().slice(0, limit);
+  } catch (error) {
+    console.error('Error reading payload log:', error);
+    return [];
+  }
 }
 
 function formatBytes(bytes: number): string {
@@ -78,6 +78,85 @@ function formatBytes(bytes: number): string {
 function estimateTokens(text: string): number {
   // Rough estimate: ~4 chars per token
   return Math.ceil(text.length / 4);
+}
+
+function extractLastUserMessage(messages: Array<{
+  role: string;
+  content: string | Array<{ type: string; text?: string; [key: string]: unknown }>;
+}>): string | null {
+  // Find the last user message
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role === 'user') {
+      if (typeof msg.content === 'string') {
+        return msg.content;
+      } else if (Array.isArray(msg.content)) {
+        // Find text blocks (skip tool_result blocks which are usually verbose)
+        for (const block of msg.content) {
+          if (block.type === 'text' && block.text) {
+            return block.text;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function detectTurnType(messages: Array<{
+  role: string;
+  content: string | Array<{ type: string; text?: string; [key: string]: unknown }>;
+}>): 'new_turn' | 'continuation' {
+  if (!messages || messages.length === 0) return 'new_turn';
+  
+  // Get the last message
+  const lastMsg = messages[messages.length - 1];
+  
+  // If last message is from assistant, this shouldn't happen (we're looking at requests)
+  // If last message is from user, check what type of content it has
+  if (lastMsg.role === 'user') {
+    if (typeof lastMsg.content === 'string') {
+      // Plain string = user text = new turn
+      return 'new_turn';
+    } else if (Array.isArray(lastMsg.content)) {
+      // Check the LAST block in the content array
+      const lastBlock = lastMsg.content[lastMsg.content.length - 1];
+      if (lastBlock?.type === 'tool_result') {
+        return 'continuation';
+      }
+      // If last block is text, it's a new turn
+      if (lastBlock?.type === 'text') {
+        return 'new_turn';
+      }
+    }
+  }
+  
+  return 'new_turn';
+}
+
+function extractTriggeringMessage(messages: Array<{
+  role: string;
+  content: string | Array<{ type: string; text?: string; [key: string]: unknown }>;
+}>): string | null {
+  if (!messages || messages.length === 0) return null;
+  
+  const lastMsg = messages[messages.length - 1];
+  
+  if (lastMsg.role === 'user') {
+    if (typeof lastMsg.content === 'string') {
+      return lastMsg.content;
+    } else if (Array.isArray(lastMsg.content)) {
+      // For new turns, get the text content
+      // For continuations, we could show the tool name but let's just return null
+      for (const block of lastMsg.content) {
+        if (block.type === 'text' && block.text) {
+          return block.text;
+        }
+      }
+    }
+  }
+  
+  return null;
 }
 
 function summarizePayload(entry: PayloadEntry) {
@@ -123,6 +202,19 @@ function summarizePayload(entry: PayloadEntry) {
     }
   }
 
+  // Extract last user message for preview (legacy)
+  const lastUserMessage = payload.messages ? extractLastUserMessage(payload.messages) : null;
+  const userPreview = lastUserMessage 
+    ? lastUserMessage.slice(0, 100) + (lastUserMessage.length > 100 ? '...' : '')
+    : null;
+
+  // Detect turn type and triggering message
+  const turnType = payload.messages ? detectTurnType(payload.messages) : 'new_turn';
+  const triggeringMessageRaw = payload.messages ? extractTriggeringMessage(payload.messages) : null;
+  const triggeringMessage = triggeringMessageRaw
+    ? triggeringMessageRaw.slice(0, 150) + (triggeringMessageRaw.length > 150 ? '...' : '')
+    : null;
+
   // Tool analysis
   const toolCount = payload.tools?.length ?? 0;
   const toolNames = payload.tools?.map(t => t.name) ?? [];
@@ -131,6 +223,9 @@ function summarizePayload(entry: PayloadEntry) {
   return {
     model: payload.model,
     maxTokens: payload.max_tokens,
+    turnType, // 'new_turn' or 'continuation'
+    triggeringMessage, // The actual message that triggered this request
+    userPreview, // Preview of the last user message (legacy)
     systemPrompt: {
       chars: systemPromptChars,
       estimatedTokens: estimateTokens(systemPromptChars.toString()),
@@ -172,7 +267,7 @@ export async function GET(request: Request) {
     }
 
     const stats = fs.statSync(PAYLOAD_LOG_PATH);
-    const entries = await readPayloadLog(limit);
+    const entries = readPayloadLog(limit);
 
     // Process entries - add summaries
     const processed = entries.map(entry => {
